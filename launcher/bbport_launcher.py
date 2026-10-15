@@ -112,6 +112,9 @@ DRAW_PIPE = [("Авто", "", "Включён при 8 и более поток�
 LANGUAGES = [("Английский", "1"), ("Русский", "8"), ("Японский", "0"), ("Французский", "2"),
              ("Испанский", "3"), ("Немецкий", "4"), ("Итальянский", "5")]
 LIVE_RESOLUTION = [("Авто (по видеокарте)", "auto"), ("Выключена (быстрее)", "0"), ("Включена", "1")]
+# The game's button prompts (builtin_mods/kbm_icons, tools/kbm_icons.py): keyboard and mouse keys by
+# default, the original gamepad pictures otherwise.
+BUTTON_ICONS = [("Клавиатура и мышь", "kbm"), ("Геймпад, как в игре", "pad")]
 READBACKS = [("Relaxed", "", "По умолчанию"), ("Выключены", "0"), ("Precise", "2")]
 # Background pre-upload of the game's GPU memory into VRAM (BB_PREUPLOAD): auto = on with a discrete GPU.
 PREUPLOAD = [("Обычная", "", "Без лишней видеопамяти"), ("Полная", "2", "Около 3 ГБ видеопамяти сверху"),
@@ -130,6 +133,7 @@ DEFAULTS = {
     "present_mode": "Mailbox",
     "gamepad": "",
     "gamepad_name": "",
+    "button_icons": "kbm",
     "display": "",
     "skip_network_choice": True,
     "fps_mode": "uncap",
@@ -297,6 +301,9 @@ def game_environment(s):
     env["BB_MODS_DIR"] = str(Path(s.get("mods_dir") or DATA_DIR / "mods").expanduser())
     env["BB_MODS_CONFIG"] = str(DATA_DIR / "mods.json")
     env["BB_MODS_ENABLED"] = "1" if s.get("mods_enabled", True) else "0"
+    # Built-in mods load first (a mod of the player's still replaces their files), mods on or off.
+    env["BB_BUILTIN_MODS"] = str(PORT_DIR / "builtin_mods" / "kbm_icons") \
+        if s.get("button_icons", "kbm") == "kbm" else ""
     env["BB_PATCHES_DIR"] = str(patches_dir(s))
     env["BB_PATCHES_CONFIG"] = str(DATA_DIR / "patches.json")
     env["BB_LANGUAGE"] = s["language"]
@@ -645,6 +652,9 @@ class LauncherWindow(Adw.ApplicationWindow):
                                                 lambda _button: self.fill_gamepads()))
         self.fill_gamepads()
         controls.add(self.gamepad_row)
+        self.button_icons_row = combo_row(tr("Значки кнопок в игре"), tr("Применяется при запуске игры"),
+                                          BUTTON_ICONS, self.settings.get("button_icons", "kbm"))
+        controls.add(self.button_icons_row)
         # Bindings: "Assign" waits for a key or button (bb-gpu-capabilities --read-input).
         self.control_rows = {}
         for kind, title, icon in (("key", tr("Клавиатура и мышь"), "input-keyboard-symbolic"),
@@ -1027,6 +1037,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         s = self.settings
         s["gamepad"] = combo_value(self.gamepad_row)
         s["gamepad_name"] = self.gamepad_row.names[self.gamepad_row.get_selected()]
+        s["button_icons"] = combo_value(self.button_icons_row)
         s["display"] = combo_value(self.display_row)
         s["skip_network_choice"] = self.skip_network_row.get_active()
         s["language"] = combo_value(self.language_row)
