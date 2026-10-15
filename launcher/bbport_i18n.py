@@ -42,6 +42,7 @@ EN = {
     "Найден eboot.bin": "eboot.bin found",
     "Нет eboot.bin в папке": "No eboot.bin in the folder",
     "Управление": "Controls",
+    "Шаг (удерживать)": "Walk (hold)",
     "Клавиатура": "Keyboard",
     "Геймпад": "Gamepad",
     "Назначение кнопок; применяется при запуске игры": "Button assignments; applied when the game starts",
@@ -333,6 +334,8 @@ EN = {
 }
 
 PT_BR = {
+    # Controls: walking on the keyboard
+    "Шаг (удерживать)": "Caminhar (segurar)",
     # Window, pages, buttons
     "Запустить": "Jogar",
     "Остановить": "Parar",
@@ -578,6 +581,7 @@ ZH_CN = {
     "Найден eboot.bin": "已找到 eboot.bin",
     "Нет eboot.bin в папке": "文件夹中没有 eboot.bin",
     "Управление": "操作设置",
+    "Шаг (удерживать)": "行走（按住）",
     "Клавиатура": "键盘",
     "Геймпад": "手柄",
     "Назначение кнопок; применяется при запуске игры": "按键绑定；在游戏启动时生效",
