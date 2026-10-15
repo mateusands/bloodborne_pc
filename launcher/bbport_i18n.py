@@ -249,7 +249,12 @@ EN = {
     "Камера мышью": "Mouse look",
     "Щелчок в окне игры захватывает мышь, F1 — отпускает": "A click in the game window takes the mouse, F1 releases it",
     "Чувствительность мыши": "Mouse sensitivity",
+    "1,00 — около 5650 отсчётов мыши на полный оборот. Выше — быстрее. Игра перечитывает bbport.ini на ходу":
+        "1.00 is about 5650 mouse counts per full turn. Higher is faster. The game re-reads bbport.ini while it runs",
     "Инвертировать мышь по вертикали": "Invert mouse Y axis",
+    "Камера без инерции": "Mouse camera without coasting",
+    "Скорость мыши сразу становится стиком и отпускает его в том же кадре. Выключите, чтобы вернуть фильтр 60 мс":
+        "Mouse speed becomes the stick at once and releases it on the same sample. Turn off to restore the 60 ms filter",
     "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1":
         "DLSS not found: choose NVIDIA's library below (a build with the DLSS bridge is needed too). The game will use FSR 3.1",
     "Нет или повреждён файл {}": "Missing or damaged file {}",
@@ -536,6 +541,11 @@ PT_BR = {
     "Слои валидации Vulkan": "Camadas de validação do Vulkan",
     "Сильно замедляет": "Muito mais lento",
     "Доп. переменные (ИМЯ=значение через пробел)": "Variáveis extras (NOME=valor, separadas por espaço)",
+    "Камера без инерции": "Câmera sem inércia",
+    "1,00 — около 5650 отсчётов мыши на полный оборот. Выше — быстрее. Игра перечитывает bbport.ini на ходу":
+        "1,00 são cerca de 5650 contagens do mouse por volta. Maior gira mais rápido. O jogo relê o bbport.ini enquanto roda",
+    "Скорость мыши сразу становится стиком и отпускает его в том же кадре. Выключите, чтобы вернуть фильтр 60 мс":
+        "A velocidade do mouse vira o analógico na hora e solta no mesmo quadro. Desligue para voltar ao filtro de 60 ms",
 }
 
 
@@ -741,7 +751,12 @@ ZH_CN = {
     "Камера мышью": "鼠标控制视角",
     "Щелчок в окне игры захватывает мышь, F1 — отпускает": "在游戏窗口中单击以捕获鼠标，按 F1 释放",
     "Чувствительность мыши": "鼠标灵敏度",
+    "1,00 — около 5650 отсчётов мыши на полный оборот. Выше — быстрее. Игра перечитывает bbport.ini на ходу":
+        "1.00 约为每转 5650 个鼠标计数。更高更快。游戏运行时会重读 bbport.ini",
     "Инвертировать мышь по вертикали": "反转鼠标纵轴",
+    "Камера без инерции": "鼠标视角无惯性",
+    "Скорость мыши сразу становится стиком и отпускает его в том же кадре. Выключите, чтобы вернуть фильтр 60 мс":
+        "鼠标速度立刻成为摇杆，并在同一采样松开。关闭后恢复 60 毫秒滤波",
     "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1":
         "未找到 DLSS：请在下方选择 NVIDIA 的库（还需要带 DLSS 桥接的版本）。游戏将改用 FSR 3.1",
     "Нет или повреждён файл {}": "文件 {} 缺失或已损坏",

@@ -6,9 +6,10 @@
  *   E Square, Q Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, C R3,
  *   Enter Options, Tab left touchpad, Backspace right touchpad,
  *   IJKL d-pad (I up, K down, J left, L right).
- *   Mouse (once the game window is clicked; F1 or leaving the window releases it): look (the
- *   right stick), Left R1, Right L2, Middle R3, side buttons R2 (X1) and L1 (X2), wheel the
- *   d-pad's up/down (quick items).
+ *   Mouse: while looking, Left is R1, Right is L2, Middle is R3, side buttons are R2 (X1) and
+ *   L1 (X2), and the wheel is the d-pad up/down (quick items). In a menu the cursor shows on
+ *   its own: it moves the highlight onto the row under it, left click confirms, right click
+ *   goes back. F1 frees the cursor during play.
  *
  * Stick neutral: SDL exposes no way to read a pad's calibration and some clones report a
  * biased neutral (a Switch-style pad was seen returning both sticks at a constant ~ +/-16380).
@@ -355,16 +356,19 @@ static int key_from_name(const char *name) {
     return s==SDL_SCANCODE_UNKNOWN ? -1 : (int)s;
 }
 /* Mouse look (bbport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
- * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. */
-static int mouse_look=1, mouse_invert_y;
+ * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1.
+ * mouse_look_v2=1 (default) maps speed straight onto both right-stick axes and lets go on the
+ * next still sample. mouse_look_v2=0 keeps the 60 ms integrator. BB_MOUSE_LOOK_V2 overrides. */
+static int mouse_look=1, mouse_invert_y, mouse_look_v2=1;
 static float mouse_sensitivity=1.0f;
+static void mouse_look_v2_from_env(void);
 /* key.<input>= / pad.<input>= lines of the settings file. */
 static void load_bindings(void) {
     bind_defaults();
-    mouse_look=1; mouse_invert_y=0; mouse_sensitivity=1.0f;
+    mouse_look=1; mouse_invert_y=0; mouse_sensitivity=1.0f; mouse_look_v2=1;
     const char *path=getenv("BB_CONFIG");
     FILE *f=path ? fopen(path,"r") : NULL;
-    if (!f) return;
+    if (!f) { mouse_look_v2_from_env(); return; }
     char line[512];
     while (fgets(line,sizeof line,f)) {
         const int keyboard=!strncmp(line,"key.",4), pad=!strncmp(line,"pad.",4);
@@ -376,7 +380,7 @@ static void load_bindings(void) {
             else if (!strncmp(line,"mouse_sensitivity=",18)) {
                 const float v=strtof(value,NULL);
                 if (v>=0.05f && v<=20.0f) mouse_sensitivity=v;
-            }
+            } else if (!strncmp(line,"mouse_look_v2=",14)) mouse_look_v2=atoi(value)!=0;
             continue;
         }
         if ((!keyboard && !pad) || !eq) continue;
@@ -402,12 +406,53 @@ static void load_bindings(void) {
         }
     }
     fclose(f);
+    mouse_look_v2_from_env();
+}
+static void mouse_look_v2_from_env(void) {
+    const char *mode=getenv("BB_MOUSE_LOOK_V2");
+    if (mode && *mode) mouse_look_v2=atoi(mode)!=0;
+}
+/* Direct camera: sensitivity 1 turns 900 counts per radian (~5650 per full turn).
+ * The ini is re-read while playing, so mouse_sensitivity= can be edited without a restart. */
+static void refresh_mouse_tune(void) {
+    static uint64_t last_us, seen_ns;
+    const uint64_t now=now_us();
+    if (last_us && now-last_us<250000) return;
+    last_us=now;
+    const char *path=getenv("BB_CONFIG");
+    if (!path || !*path) return;
+    struct stat st;
+    if (stat(path,&st)!=0) return;
+    const uint64_t ns=(uint64_t)st.st_mtim.tv_sec*1000000000ull+(uint64_t)st.st_mtim.tv_nsec;
+    if (ns==seen_ns) return;
+    const int first=seen_ns==0;
+    seen_ns=ns;
+    FILE *f=fopen(path,"r");
+    if (!f) return;
+    char line[512];
+    while (fgets(line,sizeof line,f)) {
+        if (!strncmp(line,"mouse_sensitivity=",18)) {
+            const float v=strtof(line+18,NULL);
+            if (v>=0.05f && v<=20.0f && v!=mouse_sensitivity) {
+                mouse_sensitivity=v;
+                if (!first)
+                    printf("Mouse sensitivity: %.2f (%.0f counts per full turn)\n",
+                           v,(900.0f/v)*6.2831853f);
+            }
+        } else if (!strncmp(line,"mouse_invert_y=",15)) mouse_invert_y=atoi(line+15)!=0;
+    }
+    fclose(f);
 }
 /* The mouse while the window holds it: buttons, and the wheel as short presses (one per notch,
  * each held and released for a few frames so the game sees it). */
 static SDL_MouseButtonFlags mouse_buttons;
 static int wheel_pending[2], wheel_phase[2]; /* [up, down]; phase: 0 idle, else press/release */
 static uint64_t wheel_until[2];
+static void mouse_wheel_reset(void) {
+    wheel_pending[0]=wheel_pending[1]=0;
+    wheel_phase[0]=wheel_phase[1]=0;
+    wheel_until[0]=wheel_until[1]=0;
+}
 static void mouse_wheel_step(uint64_t now, int up, int down) {
     wheel_pending[0]+=up; wheel_pending[1]+=down;
     for (int i=0;i<2;++i) {
@@ -443,8 +488,10 @@ static int pad_value(SDL_Gamepad *g, int input) {
     return value;
 }
 
-/* key held for the negative / positive direction: the stick all the way, else the gamepad's. */
+/* key held for the negative / positive direction: the stick all the way, else the gamepad's.
+ * Both directions at once keep that base byte (128 with no gamepad), not 127. */
 static uint8_t key_axis(uint8_t value, int negative, int positive) {
+    if (negative && positive) return value;
     return negative || positive ? (uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0)) : value;
 }
 static void apply_keyboard(PadData *d, const bool *k) {
@@ -461,11 +508,15 @@ static void apply_keyboard(PadData *d, const bool *k) {
 }
 
 /* Mouse look: the game turns its camera at a rate set by the right stick, so the stick follows
- * the mouse's speed. Each sample adds the motion since the last one and the sum decays over
- * LOOK_TAU (linearly per sample: the level a steady speed holds, speed * gain * LOOK_TAU, is the
- * same at any frame rate). ~1000 pixels/s reach full deflection at sensitivity 1. The game ignores
+ * the mouse's speed. ~1000 pixels/s reach full deflection at sensitivity 1. The game ignores
  * small deflections, so a moving mouse starts past them (BB_MOUSE_DEADZONE, default 16 of 127):
- * slow aiming still turns the camera. While the mouse moves it replaces the right stick. */
+ * slow aiming still turns the camera.
+ * v2 (default): this sample's pixels / its real duration, both axes together. A still sample
+ * writes nothing, so the gamepad byte already in the pad comes back at once. A hitch cannot
+ * saturate the stick: the same pixels spread over a long poll are a low speed.
+ * v1 (mouse_look_v2=0): each sample adds the motion and the sum decays over LOOK_TAU. The level
+ * a steady speed holds is the same at any frame rate, and the stick keeps coasting after the
+ * mouse stops. */
 #define LOOK_TAU_US 60000.0f
 static float look_x, look_y;
 static uint64_t look_last_us;
@@ -476,24 +527,74 @@ static uint8_t look_axis(float value, uint8_t stick, int deadzone) {
     const int v=128+(int)(value<0 ? -out : out);
     return (uint8_t)(v<0 ? 0 : v>255 ? 255 : v);
 }
-static void apply_mouse_look(PadData *d, double dx, double dy, uint64_t now, int captured) {
-    float dt=look_last_us && now>look_last_us ? (float)(now-look_last_us) : 0.0f;
-    look_last_us=now;
-    if (!captured) { look_x=look_y=0; return; }
-    if (dt>LOOK_TAU_US) dt=LOOK_TAU_US;
+static int mouse_deadzone(void) {
     static int deadzone=-1;
     if (deadzone<0) {
         const char *env=getenv("BB_MOUSE_DEADZONE");
         deadzone=env && *env ? atoi(env) : 16;
         if (deadzone<0 || deadzone>100) deadzone=16;
     }
+    return deadzone;
+}
+static float clamp_look(float value) {
+    return value<-127 ? -127 : value>127 ? 127 : value;
+}
+static void apply_mouse_look(PadData *d, double dx, double dy, uint64_t now, int captured) {
+    float dt=look_last_us && now>look_last_us ? (float)(now-look_last_us) : 0.0f;
+    look_last_us=now;
+    if (!captured || !mouse_look) { look_x=look_y=0; runtime_cam_set_hook(0); return; }
+    /* Direct camera owns yaw/pitch. Lock-on (and the moment before the camera
+     * object exists) still uses the stick, so a flick can change targets. */
+    if (runtime_cam_set_hook(1)) {
+        int locked=0;
+        if (runtime_cam_motion((float)dx,(float)dy,mouse_sensitivity,mouse_invert_y,&locked) && !locked)
+            return;
+    }
+    const int deadzone=mouse_deadzone();
+    if (mouse_look_v2) {
+        /* No new motion: leave the gamepad/keyboard bytes already stored on the pad. */
+        if (dx==0.0 && dy==0.0) { look_x=look_y=0; return; }
+        const double seconds=dt>0.0f ? (double)dt/1e6 : 1.0/60.0;
+        const float scale=127.0f*mouse_sensitivity/1000.0f;
+        look_x=clamp_look((float)(dx/seconds)*scale);
+        look_y=clamp_look((float)((mouse_invert_y ? -dy : dy)/seconds)*scale);
+        if (look_x*look_x+look_y*look_y<0.25f) return;
+        /* Own both axes while the mouse is moving, including a quiet one (128, not the pad). */
+        d->right_x=look_axis(look_x,128,deadzone);
+        d->right_y=look_axis(look_y,128,deadzone);
+        return;
+    }
+    if (dt>LOOK_TAU_US) dt=LOOK_TAU_US;
     const float gain=127.0f/(1000.0f*LOOK_TAU_US/1e6f)*mouse_sensitivity, decay=1.0f-dt/LOOK_TAU_US;
-    look_x=look_x*decay+(float)dx*gain;
-    look_y=look_y*decay+(float)(mouse_invert_y ? -dy : dy)*gain;
-    look_x=look_x<-127 ? -127 : look_x>127 ? 127 : look_x;
-    look_y=look_y<-127 ? -127 : look_y>127 ? 127 : look_y;
+    look_x=clamp_look(look_x*decay+(float)dx*gain);
+    look_y=clamp_look(look_y*decay+(float)(mouse_invert_y ? -dy : dy)*gain);
     d->right_x=look_axis(look_x,d->right_x,deadzone);
     d->right_y=look_axis(look_y,d->right_y,deadzone);
+}
+/* Cursor mode (mouse not captured). The game's menus have no pointer hit test, so the pointer
+ * steps the d-pad (one notch per 48 px, or per wheel notch) and the buttons confirm or go back.
+ * A notch is one sample, then a sample with the d-pad released, so the menu sees a new press
+ * instead of one held direction. */
+static double ui_acc_x, ui_acc_y;
+static int ui_gap;
+static void apply_mouse_cursor(PadData *d, double dx, double dy, int wheel_up, int wheel_down) {
+    if (SDL_WasInit(SDL_INIT_VIDEO)) {
+        const uint32_t buttons=SDL_GetMouseState(NULL,NULL);
+        if (buttons & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) d->buttons|=BTN_CROSS;
+        if (buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) d->buttons|=BTN_CIRCLE;
+    }
+    ui_acc_x+=dx;
+    ui_acc_y+=dy+(double)(wheel_down-wheel_up)*48.0;
+    if (ui_gap) { ui_gap=0; return; }
+    const double step=48.0;
+    const double ax=ui_acc_x<0 ? -ui_acc_x : ui_acc_x, ay=ui_acc_y<0 ? -ui_acc_y : ui_acc_y;
+    if (ax<step && ay<step) return;
+    if (ax>=ay) {
+        if (ui_acc_x>0) { d->buttons|=BTN_RIGHT; ui_acc_x-=step; }
+        else { d->buttons|=BTN_LEFT; ui_acc_x+=step; }
+    } else if (ui_acc_y>0) { d->buttons|=BTN_DOWN; ui_acc_y-=step; }
+    else { d->buttons|=BTN_UP; ui_acc_y+=step; }
+    ui_gap=1;
 }
 
 static void sample_host(PadData *d) {
@@ -505,16 +606,33 @@ static void sample_host(PadData *d) {
     d->timestamp=now_us();
     SDL_Gamepad *g=current_gamepad();
     if (!bindings_ready) { load_bindings(); bindings_ready=1; bbgpu_mouse_look_enable(mouse_look); }
+    refresh_mouse_tune();
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
      * the menu is open); it counts while the window holds the mouse. */
     double mouse_dx=0, mouse_dy=0;
     int wheel_up=0, wheel_down=0;
     bbgpu_mouse_take(&mouse_dx,&mouse_dy,&wheel_up,&wheel_down);
-    const int captured=bbgpu_mouse_captured();
-    if (bbgpu_overlay_captures_input()) { apply_mouse_look(d,0,0,d->timestamp,0); return; } /* menu open: neutral input */
+    float ui_x=0, ui_y=0;
+    int ui_left=0, ui_right=0, ui_wheel=0, ui_typing=0;
+    bbgpu_mouse_ui(&ui_x,&ui_y,&ui_left,&ui_right,&ui_wheel,&ui_typing);
+    runtime_menu_note(ui_x,ui_y,ui_left,ui_right,ui_wheel,ui_typing);
+    const int in_menu=runtime_menu_in_menu();
+    bbgpu_mouse_set_menu(in_menu);
+    bbgpu_mouse_auto_look(runtime_menu_ready());
+    const int captured=bbgpu_mouse_captured() && !in_menu;
+    if (bbgpu_overlay_captures_input()) { /* port menu: neutral input, and no wheel left to replay */
+        mouse_wheel_reset();
+        ui_acc_x=ui_acc_y=0;
+        ui_gap=0;
+        apply_mouse_look(d,0,0,d->timestamp,0);
+        (void)runtime_menu_take_press();
+        return;
+    }
     const bool *k=SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
     mouse_buttons=captured && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetMouseState(NULL,NULL) : 0;
-    mouse_wheel_step(d->timestamp,captured ? wheel_up : 0,captured ? wheel_down : 0);
+    /* Captured: the wheel changes quick items. A menu spends the wheel on its own list. */
+    if (captured) { mouse_wheel_step(d->timestamp,wheel_up,wheel_down); ui_acc_x=ui_acc_y=0; ui_gap=0; }
+    else mouse_wheel_reset();
     if (g) {
         int touch_right=0;
         for (int i=IN_CROSS;i<=IN_RIGHT;++i) {
@@ -548,8 +666,14 @@ static void sample_host(PadData *d) {
         if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0);
         if (touch_right) touch_click(d,1);
     }
-    apply_keyboard(d,k); /* the bound mouse buttons too */
-    apply_mouse_look(d,mouse_dx,mouse_dy,d->timestamp,captured);
+    apply_keyboard(d,k); /* the bound mouse buttons too, only while looking */
+    runtime_menu_set_direction((d->buttons & 0xf0u) || d->left_x<64 || d->left_x>192 ||
+                               d->left_y<64 || d->left_y>192);
+    if (in_menu) d->buttons|=runtime_menu_take_press();
+    apply_mouse_look(d,captured ? mouse_dx : 0,captured ? mouse_dy : 0,d->timestamp,captured);
+    /* Fallback when the menu hook is absent: motion steps the d-pad. */
+    if (!captured && !in_menu && !runtime_menu_ready())
+        apply_mouse_cursor(d,mouse_dx,mouse_dy,wheel_up,wheel_down);
 }
 
 /* BB_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
@@ -680,9 +804,23 @@ static void touch_ids(PadData *d) {
     else if (!since) since=d->timestamp;
     d->touch_held_time=d->touch_count ? (uint32_t)(d->timestamp-since) : 0;
 }
+static void neutral_pad(PadData *d) {
+    const uint64_t now=d->timestamp ? d->timestamp : now_us();
+    const uint8_t count=d->connected_count ? d->connected_count : 1;
+    memset(d,0,sizeof(*d));
+    d->left_x=d->left_y=d->right_x=d->right_y=128;
+    d->orientation[3]=1.0f;
+    d->connected=1; d->connected_count=count; d->timestamp=now;
+}
 static void sample(PadData *d) {
     sample_host(d);
-    if (bbgpu_overlay_captures_input()) return;
+    /* One check after the pad is composed. The menu can open on the window thread meanwhile. */
+    if (bbgpu_overlay_captures_input()) {
+        mouse_wheel_reset();
+        apply_mouse_look(d,0,0,d->timestamp,0);
+        neutral_pad(d);
+        return;
+    }
     record_sample(d);
     read_inject();
     replay_sample(d);

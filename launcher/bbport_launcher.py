@@ -171,6 +171,7 @@ INI_DEFAULTS = {
     "mouse_look": "1",
     "mouse_sensitivity": "1.00",
     "mouse_invert_y": "0",
+    "mouse_look_v2": "1",
     **{key: "1" if default else "0" for key, _, default in EFFECTS},
 }
 
@@ -668,14 +669,21 @@ class LauncherWindow(Adw.ApplicationWindow):
         controls.add(self.mouse_look_row)
         self.mouse_sensitivity_row = Adw.SpinRow.new_with_range(0.1, 10.0, 0.05)
         self.mouse_sensitivity_row.set_title(tr("Чувствительность мыши"))
+        self.mouse_sensitivity_row.set_subtitle(tr(
+            "1,00 — около 5650 отсчётов мыши на полный оборот. Выше — быстрее. Игра перечитывает bbport.ini на ходу"))
         self.mouse_sensitivity_row.set_digits(2)
         self.mouse_sensitivity_row.set_value(float(self.ini.get("mouse_sensitivity", "1.0")))
         controls.add(self.mouse_sensitivity_row)
         self.mouse_invert_row = Adw.SwitchRow(title=tr("Инвертировать мышь по вертикали"),
                                               active=self.ini.get("mouse_invert_y") == "1")
         controls.add(self.mouse_invert_row)
+        self.mouse_v2_row = Adw.SwitchRow(
+            title=tr("Камера без инерции"),
+            subtitle=tr("Скорость мыши сразу становится стиком и отпускает его в том же кадре. Выключите, чтобы вернуть фильтр 60 мс"),
+            active=self.ini.get("mouse_look_v2", "1") == "1")
+        controls.add(self.mouse_v2_row)
         def mouse_rows_sensitive(*_):
-            for row in (self.mouse_sensitivity_row, self.mouse_invert_row):
+            for row in (self.mouse_sensitivity_row, self.mouse_invert_row, self.mouse_v2_row):
                 row.set_sensitive(self.mouse_look_row.get_active())
         self.mouse_look_row.connect("notify::active", mouse_rows_sensitive)
         mouse_rows_sensitive()
@@ -1060,6 +1068,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             "mouse_look": "1" if self.mouse_look_row.get_active() else "0",
             "mouse_sensitivity": f"{self.mouse_sensitivity_row.get_value():.2f}",
             "mouse_invert_y": "1" if self.mouse_invert_row.get_active() else "0",
+            "mouse_look_v2": "1" if self.mouse_v2_row.get_active() else "0",
             **{key: "1" if row.get_active() else "0" for key, row in self.effect_rows.items()},
         })
         save_ini(self.ini, self.ini_lines)

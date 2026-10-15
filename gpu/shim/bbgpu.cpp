@@ -418,6 +418,26 @@ extern "C" void bbgpu_mouse_look_enable(int enabled) {
     Frontend::WindowSDL::EnableMouseLook(enabled != 0);
 }
 
+extern "C" void bbgpu_mouse_set_menu(int in_menu) {
+    if (g_window) g_window->SetMenuPointer(in_menu != 0);
+}
+
+extern "C" void bbgpu_mouse_auto_look(int enabled) {
+    if (g_window) g_window->SetAutoLook(enabled != 0);
+}
+
+extern "C" void bbgpu_mouse_ui(float* x, float* y, int* left, int* right, int* wheel, int* typing) {
+    float px = 0, py = 0;
+    int l = 0, r = 0, w = 0, t = 0;
+    if (g_window) g_window->TakeUi(px, py, l, r, w, t);
+    if (x) *x = px;
+    if (y) *y = py;
+    if (left) *left = l;
+    if (right) *right = r;
+    if (wheel) *wheel = w;
+    if (typing) *typing = t;
+}
+
 extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {
     if (!g_window) return 0;
     g_window->BeginTextInput(initial ? initial : "", prompt ? prompt : "Text");

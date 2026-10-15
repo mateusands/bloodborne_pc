@@ -123,6 +123,15 @@ void WindowSDL::TakeMouse(double& dx, double& dy, int& up, int& down) {
     wheel_up = wheel_down = 0;
 }
 
+void WindowSDL::TakeUi(float& x, float& y, int& left, int& right, int& wheel, int& typing) {
+    x = ui_x.load(std::memory_order_relaxed);
+    y = ui_y.load(std::memory_order_relaxed);
+    left = ui_left.exchange(0, std::memory_order_relaxed);
+    right = ui_right.exchange(0, std::memory_order_relaxed);
+    wheel = ui_wheel.exchange(0, std::memory_order_relaxed);
+    typing = ui_typing.load(std::memory_order_relaxed);
+}
+
 // Mouse look: relative mode while the window holds the mouse (runtime_pad.c turns its motion into
 // the right stick). Motion from before is dropped, so taking the mouse does not turn the camera.
 void WindowSDL::CaptureMouse(bool capture) {
@@ -140,9 +149,9 @@ void WindowSDL::CaptureMouse(bool capture) {
     }
     mouse_captured.store(capture, std::memory_order_relaxed);
     static bool told;
-    if (capture && !told) {
+    if (!told) {
         told = true;
-        std::printf("Mouse look: on (F1 releases the mouse, a click takes it again)\n");
+        std::printf("Mouse: the cursor shows in menus. Click a row to choose it, right click goes back.\n");
     }
 }
 
@@ -169,12 +178,9 @@ bool WindowSDL::PollEvents() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            last_mouse_motion_ms = SDL_GetTicks();
-            if (mouse_captured.load(std::memory_order_relaxed)) {
-                std::scoped_lock lock{mouse_mutex};
-                mouse_dx += event.motion.xrel;
-                mouse_dy += event.motion.yrel;
-            }
+            std::scoped_lock lock{mouse_mutex};
+            mouse_dx += event.motion.xrel;
+            mouse_dy += event.motion.yrel;
         }
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
@@ -195,23 +201,28 @@ bool WindowSDL::PollEvents() {
         if (BbOverlay::HandleEvent(event)) {
             continue;
         }
-        // Mouse look: a click in the game takes the mouse (that click is not passed on as a
-        // button: runtime_pad.c reads the buttons only while it is held); F1 and leaving the
-        // window let it go.
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouse_captured.load(std::memory_order_relaxed) &&
-            mouse_look.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen()) {
-            CaptureMouse(true);
-            continue;
-        }
+        // F1 frees the cursor during play. A menu shows it on its own and takes it back after.
         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F1 &&
-            mouse_captured.load(std::memory_order_relaxed)) {
-            CaptureMouse(false);
+            mouse_look.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen()) {
+            if (auto_look.load(std::memory_order_relaxed)) {
+                user_freed.store(!user_freed.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            } else {
+                CaptureMouse(!mouse_captured.load(std::memory_order_relaxed));
+            }
             continue;
         }
-        if (event.type == SDL_EVENT_MOUSE_WHEEL && mouse_captured.load(std::memory_order_relaxed)) {
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            if (event.button.button == SDL_BUTTON_LEFT) ui_left.store(1, std::memory_order_relaxed);
+            if (event.button.button == SDL_BUTTON_RIGHT) ui_right.store(1, std::memory_order_relaxed);
+        }
+        if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             const float notches = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
-            std::scoped_lock lock{mouse_mutex};
-            (notches > 0 ? wheel_up : wheel_down) += notches != 0 ? 1 : 0;
+            if (notches != 0 && menu_pointer.load(std::memory_order_relaxed)) {
+                ui_wheel.fetch_add(notches > 0 ? 1 : -1, std::memory_order_relaxed);
+            } else if (notches != 0) {
+                std::scoped_lock lock{mouse_mutex};
+                (notches > 0 ? wheel_up : wheel_down) += 1;
+            }
         }
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
             CaptureMouse(false);
@@ -233,21 +244,30 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
-    // The menu, the name dialog and mouse_look=0 want the cursor.
-    if (mouse_captured.load(std::memory_order_relaxed) &&
-        (BbOverlay::MenuOpen() || text_active || !mouse_look.load(std::memory_order_relaxed))) {
-        CaptureMouse(false);
-    }
+    // The port menu, the name box and mouse_look=0 want the cursor. With the menu pointer
+    // hooked, a game menu does too, and play captures the mouse again when the menu closes.
+    float mx = 0, my = 0;
+    SDL_GetMouseState(&mx, &my);
+    ui_x.store(mx, std::memory_order_relaxed);
+    ui_y.store(my, std::memory_order_relaxed);
+    ui_typing.store(text_active ? 1 : 0, std::memory_order_relaxed);
+    const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    const bool menu = menu_pointer.load(std::memory_order_relaxed);
+    const bool automatic = auto_look.load(std::memory_order_relaxed);
+    const bool release = BbOverlay::MenuOpen() || text_active || !mouse_look.load(std::memory_order_relaxed) ||
+                         (automatic && (menu || user_freed.load(std::memory_order_relaxed) || !focused));
+    const bool grab = automatic && !menu && focused && mouse_look.load(std::memory_order_relaxed) &&
+                      !user_freed.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen() && !text_active;
+    if (mouse_captured.load(std::memory_order_relaxed) && release) CaptureMouse(false);
+    else if (!mouse_captured.load(std::memory_order_relaxed) && grab) CaptureMouse(true);
     UpdateCursor();
     return is_open;
 }
 
-// Issue #3: the OS cursor over the game. Hidden in fullscreen, and in a window after 3 s without
-// moving the mouse; always shown while the settings menu is open.
+// Hidden while looking (the pointer is the camera). Shown for menus, including fullscreen,
+// so a click can confirm and the pointer can move the selection.
 void WindowSDL::UpdateCursor() {
-    const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-    const bool hide = !BbOverlay::MenuOpen() &&
-                      (fullscreen || SDL_GetTicks() - last_mouse_motion_ms > 3000);
+    const bool hide = mouse_captured.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen();
     if (hide != cursor_hidden) {
         cursor_hidden = hide;
         hide ? SDL_HideCursor() : SDL_ShowCursor();

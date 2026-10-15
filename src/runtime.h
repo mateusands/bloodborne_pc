@@ -90,6 +90,19 @@ uintptr_t runtime_audio_resolve(const char *name);
 void runtime_audio_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
 void runtime_pad_report(void);
+/* Direct mouse camera (Bloodborne 1.09). No-op when the camera code is absent. */
+void runtime_cam_prepare(const void *image, size_t size);
+int runtime_cam_set_hook(int on);
+int runtime_cam_motion(float dx, float dy, float sensitivity, int invert_y, int *locked);
+/* Menu pointer (Bloodborne 1.09). ready: the list update was hooked. in_menu: the title
+ * or a menu has the screen, so the cursor is shown and the camera lets the mouse go.
+ * note: window position and edges for this sample. take_press: one pad mask, then 0. */
+void runtime_menu_prepare(const void *image, size_t size);
+int runtime_menu_ready(void);
+int runtime_menu_in_menu(void);
+void runtime_menu_note(float x, float y, int left, int right, int wheel, int typing);
+uint32_t runtime_menu_take_press(void);
+void runtime_menu_set_direction(int held);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);
